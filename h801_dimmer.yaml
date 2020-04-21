@@ -52,6 +52,7 @@ mqtt:
   
 web_server:
   port: 80
+  # included so these can be changed easily later on; these are the defaults
   css_url: https://esphome.io/_static/webserver-v1.min.css 
   js_url: https://esphome.io/_static/webserver-v1.min.js
 
@@ -66,10 +67,11 @@ debug:
 
 logger:
   level: VERBOSE
+  # disable serial logging as we ar eusing the pins as button inputs
   baud_rate: 0
   #hardware_uart: UART1
 
-# Enable Home Assistant API
+# Enable Home Assistant API (Not using this so enable this if needed)
 #api:
 #  password: "SomePassword3"
 
@@ -90,7 +92,7 @@ globals:
     type: int
     restore_value: no
     initial_value: '1'
-  - id: PV_loop_stop #dimmer steps
+  - id: PV_loop_stop # stop the while loop upon min/max brightness
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -108,7 +110,7 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-  - id: KV_loop_stop #dimmer steps
+  - id: KV_loop_stop  # stop the while loop upon min/max brightness
     type: bool
     restore_value: no
     initial_value: 'false'   
