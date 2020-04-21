@@ -20,3 +20,5 @@ Dimmer button behaviour:
 Here's how it looks on a breadboard for testing:
 
 ![alt text](H801_dimmer.jpg "ESPhome H801 based dimmer - breadboard test setup")
+
+Note: the NodeMCU in the left is not part of the H801 test setup - it's just there by default....
