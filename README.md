@@ -2,14 +2,14 @@
 ESPhome yaml for a 2 channel DC monochromatic dimmer with control buttons and some extras.
 
 What is ESPhome? See [here](https://esphome.io). <BR><BR>
-The H801 is a cheap esp8266 based 5 channe (RGBWW) dimmer. I am going to use this in my kitchen for the ceiling and cabinet LED lights. They need to be locally controlled through push buttons. These are integrated into the wall as part of the existing installation. I use the Gira brand and in my case the kitchen is already prepared for this (separate DC low voltage cables inside the wall). In addition I also want it controllable through the home automation of course. At present I am using Domoticz.
+The H801 is a cheap esp8266 based 5 channel (RGBWW) dimmer. I am going to use this in my kitchen for the ceiling and cabinet LED lights. They need to be locally controlled through push buttons. These are already integrated into the wall as part of the existing installation. I use the Gira brand and in my case, the kitchen is already prepared for this (separate DC low voltage cables inside the wall). In addition I also want it controllable through the home automation of course. At present I am using Domoticz.
 
 More info on the H801 can be found on the [ESPhome](https://esphome.io/cookbook/h801.html) site, on [Revspace](https://revspace.nl/H801) (Dutch only) and by [Tinkerman](https://tinkerman.cat/post/closer-look-h801-led-wifi-controller) (who btw also has great ESP8266 firmware, ESPURNA).
 
 <B>Hardware setup</B>:
 
 - 2 x PWM outputs to control two strings of LED lights
-- 1 x Switch output to switch 12V (I have a 12V Internet radio / smart speaker that has no pwoer off button so I want to control the power)
+- 1 x Switch output to switch 12V (I have a 12V Internet radio / smart speaker that has no power off button so I want to control the power)
 - 2 x push buttons for the dimmer (one per light)
 - 1 x push button to control the switch
 - 1 x active buzzer (defined as a light output) to get audible feedback for events. The buzzer is connected to 12V through a resistor
