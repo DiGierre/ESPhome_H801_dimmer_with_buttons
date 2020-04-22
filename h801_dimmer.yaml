@@ -1,6 +1,15 @@
 # H801 ESP8266 dimmer sketch with 2 dimmer outputs, one switched output (to turn on/off 12V power to a device) and one switched output to which an active buzzer is connected
 # 2 button inmputs to control the dimmer outputs, one button input to control the switch
+# version: 0.3 - first stable version
+# version: 0.4 - added gamma reverse compensation for brightness in relative_brightness lambda function to get better step values (previously relied on gamma set to 1.0 in light definition to stay leneair)
+#              - Avoid dimming up if current brightness is already at maximum value (no point trying to dim up and only leads to unnecesary buzzer beep)
+#              - Avoid dimming down if current brightness is already at minimum value (no point trying to dim down and only leads to unnecesary buzzer beep)
+#              - Changed default values for Dimmer step to 0.02, transition_length to 0.05s and delay to 0.04s
+#              - Changed default values for wifi RSSI reporting to 900s
+#              - Changed gamma_correct for lights to 2.0
 #
+
+# H801 pinout for quick reference:
 # redPIN 15 - defined as PWM output and as light but not used
 # greenPIN  13 - used for buzzer
 # bluePIN   12 - used as switch 1
@@ -28,7 +37,7 @@ esphome:
 wifi:
   ssid: "MySSID"
   password: "SomePassword"
-  manual_ip:
+  manual_ip: # I am using manual/static IP just during testing as in mu setup mDNS does not work and then you cannot do OTA. I recommend to remove this in production (avoids having to OTA a new config if you ever change your LAN setup or want to use the device in another network)
     static_ip: 192.168.100.164
     gateway: 192.168.100.254
     subnet: 255.255.255.0
@@ -40,9 +49,9 @@ wifi:
     password: "SomePassword2"
     ap_timeout: 5min
 
-time:
-  - platform: sntp
-    id: sntp_time
+# time: #not using this at present, may consider this in the future
+  # - platform: sntp
+    # id: sntp_time
     
 captive_portal:
 
@@ -52,7 +61,7 @@ mqtt:
   
 web_server:
   port: 80
-  # included so these can be changed easily later on; these are the defaults
+  # included the css/js URLs explicitly these can be changed easily later on; these are the defaults
   css_url: https://esphome.io/_static/webserver-v1.min.css 
   js_url: https://esphome.io/_static/webserver-v1.min.js
 
@@ -66,7 +75,7 @@ status_led:
 debug:
 
 logger:
-  level: VERBOSE
+  level: VERBOSE #Change the log level as required; during testing verbose is helpful. 
   # disable serial logging as we ar eusing the pins as button inputs
   baud_rate: 0
   #hardware_uart: UART1
@@ -119,10 +128,10 @@ globals:
   - id: step #dimmer steps
     type: float
     restore_value: no
-    initial_value: '0.04'
+    initial_value: '0.02'
 
 
- # sensor to report wifi RSSI
+# sensor to report wifi RSSI
 sensor:
   - platform: wifi_signal
     name: "RSSI"
@@ -217,11 +226,21 @@ binary_sensor:
                   # in the case it will set it to min brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
                   relative_brightness: !lambda |-
                         float brightness;
+                        float gamma;
                         id(light_PV).current_values_as_brightness(&brightness);
-                        // this is the gamma corrected value - we need to 'un'compensate for gamma to get a lineait %value
-                        // = pow (var,factor)
+                        // this is the gamma corrected value - we need to 'un'compensate for gamma to get a lineair %value
+                        gamma = id(light_PV).get_gamma_correct();
+                        brightness = powf(brightness,1/gamma);
                         //id(light_PV).dump_config();
-                        ESP_LOGD("main", "while loop, dim=%d, brightness=%6.4lf, step=%6.4lf, max=%6.4lf", id(dim_direction_pv), brightness,id(step),id(light_pv_max_brightness));
+                        ESP_LOGD("main", "while loop, dim=%d, brightness=%6.4lf, step=%6.4lf, max=%6.4lf, gamma=%6.4lf", id(dim_direction_pv), brightness,id(step),id(light_pv_max_brightness),gamma);
+                        if (brightness >= id(light_pv_max_brightness)) {
+                           // if we are at max already, no point in dimming up - this will ever happen at loop start because of the loopstop break, so no issues with the loop
+                           id(dim_direction_pv) = '0';
+                        }
+                        else if (brightness <= id(light_pv_min_brightness)) {
+                           // if we are at min already, no point in dimming down - this will ever happen at loop start because of the loopstop break, so no issues with the loop
+                           id(dim_direction_pv) = '1';
+                        }
                         if (id(dim_direction_pv) == '1') {
                            if ((id(step) + brightness) <= id(light_pv_max_brightness)) { 
                               return(id(step));
@@ -250,8 +269,8 @@ binary_sensor:
                         else {
                           return(0);
                         }
-                  transition_length: 0.1s
-            - delay: 0.1s
+                  transition_length: 0.05s
+            - delay: 0.04s
       # now toggle the dim up/down direction so next time we do the opposite action
       - globals.set:
           id: dim_direction_pv
@@ -348,15 +367,28 @@ binary_sensor:
             - light.dim_relative: 
                   id: light_KV
                   # This lambda will dim up or down depending on the dim direction
-                  # if dim = up, it will keep increasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until max_brightness would be exceeded
-                  # in that case it will set it to max brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
-                  # if dim = down, it will keep decreasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until min_brightness would be exceeded
-                  # in that case it will set it to min brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
+                  # if dim = up, it will keep increasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until max_brightness would be exceed
+                  # in the case it will set it to max brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
+                  # if dim = down, it will keep decreasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until min_brightness would be exceed
+                  # in the case it will set it to min brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
                   relative_brightness: !lambda |-
                         float brightness;
+                        float gamma;
                         id(light_KV).current_values_as_brightness(&brightness);
+                        // this is the gamma corrected value - we need to 'un'compensate for gamma to get a lineair %value
+                        gamma = id(light_KV).get_gamma_correct();
+                        brightness = powf(brightness,1/gamma);
                         //id(light_KV).dump_config();
+                        brightness = powf(brightness,1/id(light_KV).get_gamma_correct());
                         ESP_LOGD("main", "while loop, dim=%d, brightness=%6.4lf, step=%6.4lf, max=%6.4lf", id(dim_direction_kv), brightness,id(step),id(light_kv_max_brightness));
+                        if (brightness >= id(light_kv_max_brightness)) {
+                           // if we are at max already, no point in dimming up - this will ever happen at loop start because of the loopstop break
+                           id(dim_direction_kv) = '0';
+                        }
+                        else if (brightness <= id(light_kv_min_brightness)) {
+                           // if we are at min already, no point in dimming down - this will ever happen at loop start because of the loopstop break
+                           id(dim_direction_kv) = '1';
+                        }
                         if (id(dim_direction_kv) == '1') {
                            if ((id(step) + brightness) <= id(light_kv_max_brightness)) { 
                               return(id(step));
@@ -385,8 +417,8 @@ binary_sensor:
                         else {
                           return(0);
                         }
-                  transition_length: 0.1s
-            - delay: 0.1s
+                  transition_length: 0.05s
+            - delay: 0.04s
       # now toggle the dim up/down direction so next time we do the opposite action
       - globals.set:
           id: dim_direction_kv
@@ -423,7 +455,7 @@ switch:
 output:
   - platform: esp8266_pwm
     pin: 15
-    frequency: 1000 Hz
+    frequency: 2000 Hz
     id: pwm_r
   - platform: esp8266_pwm
     pin: 14
@@ -450,11 +482,11 @@ light:
     name: "Kitchen cabinets"
     id: light_KV
     output: pwm_w2
-    gamma_correct: 1.0
+    gamma_correct: 2.0
   - platform: monochromatic
     name: "Kitchen ceiling"
     output: pwm_w1
-    gamma_correct: 1.0
+    gamma_correct: 2.0
     id: light_PV
   - platform: monochromatic
     name: "pwm_r"
