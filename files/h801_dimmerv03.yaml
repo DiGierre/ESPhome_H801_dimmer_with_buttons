@@ -1,3 +1,4 @@
+# Version v0.3 - note this is an old version just kept for historical purposes
 # H801 ESP8266 dimmer sketch with 2 dimmer outputs, one switched output (to turn on/off 12V power to a device) and one switched output to which an active buzzer is connected
 # 2 button inmputs to control the dimmer outputs, one button input to control the switch
 #
