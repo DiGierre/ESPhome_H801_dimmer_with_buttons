@@ -1,0 +1,488 @@
+# H801 ESP8266 dimmer sketch with 2 dimmer outputs, one switched output (to turn on/off 12V power to a device) and one switched output to which an active buzzer is connected
+# 2 button inmputs to control the dimmer outputs, one button input to control the switch
+#
+# redPIN 15 - defined as PWM output and as light but not used
+# greenPIN  13 - used for buzzer
+# bluePIN   12 - used as switch 1
+# w1PIN 14 - used as PWM and as light monochromatic 1
+# w2PIN 4 - - used as PWM and as light monochromatic 2
+# // onboard red LED D1
+# LEDPIN 5 - used as status led
+# // onboard green LED D2
+# LED2PIN 1 - used as output gpio and as binary light
+# TX GPIO2 @Serial1 (Serial ONE) - used as input button for switch 1
+# RX GPIO3 @Serial - used as input button for light monochromatic 2
+# GPIO0 - - used as input button for light monochromatic 1
+
+esphome:
+  name: h801_1
+  comment: Kitchen lights
+  platform: ESP8266
+  board: esp01_1m
+  on_boot:
+    - light.turn_on:
+        id: light_buzzer
+        effect: beeptwice
+
+
+wifi:
+  ssid: "MySSID"
+  password: "SomePassword"
+  manual_ip:
+    static_ip: 192.168.100.164
+    gateway: 192.168.100.254
+    subnet: 255.255.255.0
+    dns1: 192.168.100.254
+    
+    # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "h801_1"
+    password: "SomePassword2"
+    ap_timeout: 5min
+
+time:
+  - platform: sntp
+    id: sntp_time
+    
+captive_portal:
+
+mqtt:
+  broker: mqtt.someserver.com
+  discovery: True
+  
+web_server:
+  port: 80
+  # included so these can be changed easily later on; these are the defaults
+  css_url: https://esphome.io/_static/webserver-v1.min.css 
+  js_url: https://esphome.io/_static/webserver-v1.min.js
+
+# pin 5 = red, pin 1 = green
+status_led:
+  pin:
+    number: 5
+    inverted: True
+
+# Enable logging
+debug:
+
+logger:
+  level: VERBOSE
+  # disable serial logging as we ar eusing the pins as button inputs
+  baud_rate: 0
+  #hardware_uart: UART1
+
+# Enable Home Assistant API (Not using this so enable this if needed)
+#api:
+#  password: "SomePassword3"
+
+ota:
+  password: "SomePassword4"
+
+globals:
+  # for light 1, "PV"
+  - id: light_pv_min_brightness  #set the minimum allowed brightness for light 'pv'
+    type: float
+    restore_value: no
+    initial_value: '0.05'
+  - id: light_pv_max_brightness   #set the maximum allowed brightness for light 'pv'
+    type: float
+    restore_value: no
+    initial_value: '1.0'
+  - id: dim_direction_pv   #remember the current dim direction for light 'pv'
+    type: int
+    restore_value: no
+    initial_value: '1'
+  - id: PV_loop_stop # stop the while loop upon min/max brightness
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+    
+# for light 2, "KV"
+  - id: light_kv_min_brightness  #set the minimum allowed brightness for light 'kv'
+    type: float
+    restore_value: no
+    initial_value: '0.1'
+  - id: light_kv_max_brightness   #set the maximum allowed brightness for light 'kv'
+    type: float
+    restore_value: no
+    initial_value: '1.0'
+  - id: dim_direction_kv #remember the current dim direction for light 'kv'
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: KV_loop_stop  # stop the while loop upon min/max brightness
+    type: bool
+    restore_value: no
+    initial_value: 'false'   
+    
+# Common setting dimmer steps
+  - id: step #dimmer steps
+    type: float
+    restore_value: no
+    initial_value: '0.04'
+
+
+ # sensor to report wifi RSSI
+sensor:
+  - platform: wifi_signal
+    name: "RSSI"
+    update_interval: 60s
+
+binary_sensor:
+  # Button 1: push button to control the light "PV" connected to GPIO 14 / pwm_w1
+  - platform: gpio
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "Button 1"
+    id: light_pv_button
+    # we  use multi_click to get both single and double click
+    # single click to turn on and off (toggle)
+    # double click to set either max or min brightness: if currently off then turn on with brightness=max. If currently on, then if currently brigthness equals max then set to min, else set to max
+    on_multi_click:
+    - timing:
+      - ON for at most 1s
+      - OFF for at most 1s
+      - ON for at most 1s
+      - OFF for at least 0.2s
+      then:
+        - logger.log: "on_multi_click: Double Clicked"
+        - if:
+           condition: 
+             light.is_off: light_PV
+           then:
+             - light.turn_on: 
+                id: light_PV
+                brightness: !lambda |-
+                  return id(light_pv_max_brightness);
+        - if:
+           condition: 
+             light.is_on: light_PV
+           then:
+             - light.turn_on: 
+                id: light_PV
+                # if currently off then turn on with brightness=max. If currently on, then if currently brigthness equals max then set to min, else set to max:
+                brightness: !lambda |-
+                  float brightness;
+                  id(light_PV).current_values_as_brightness(&brightness);
+                  if (brightness >= id(light_pv_max_brightness)) {
+                    return id(light_pv_min_brightness);
+                  }
+                  else {
+                    return id(light_pv_max_brightness);
+                  }           
+    # single click to turn on and off (toggle):
+    - timing:
+       - ON for at most 350ms
+       - OFF for at least 350ms
+      then:
+        - logger.log: "on_multi_click: single click"
+        - light.toggle: light_PV
+    
+    # Long press to dim up and down:  
+    on_press:
+      then:
+      - logger.log: "on_press"
+      # we need this delay (and then to look for binary_sensor.is_on) to ensure it's not a multi-click
+      - delay: 0.75s
+      - if:
+          condition: 
+            and:
+               - light.is_off: light_PV
+               - binary_sensor.is_on: light_pv_button
+          then:
+             # if the light was off we also want the long press to turn it on and then start dimming
+             - light.toggle: light_PV
+          #- delay: 0.75s
+      #
+      # this sets the globales variable that will stop the while loop from needlessly running if the buttons keeps being pressed but ar are already at max or min value
+      # it's also needed to ensure the buzzer only buzzes once and doesn't keep buzzing when the max/min is reached
+      - lambda: |-
+           id(PV_loop_stop) = false;
+      - while:
+          # keep on going as long as the button is pressed and when the max/min threshold is not exceeded yet (indicated by the global var of type bool)
+          condition:
+            and:
+               - binary_sensor.is_on: light_pv_button
+               - lambda: |-
+                   return(!id(PV_loop_stop));
+          then:
+            - light.dim_relative: 
+                  id: light_PV
+                  # This lambda will dim up or down depending on the dim direction
+                  # if dim = up, it will keep increasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until max_brightness would be exceed
+                  # in the case it will set it to max brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
+                  # if dim = down, it will keep decreasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until min_brightness would be exceed
+                  # in the case it will set it to min brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
+                  relative_brightness: !lambda |-
+                        float brightness;
+                        id(light_PV).current_values_as_brightness(&brightness);
+                        // this is the gamma corrected value - we need to 'un'compensate for gamma to get a lineait %value
+                        // = pow (var,factor)
+                        //id(light_PV).dump_config();
+                        ESP_LOGD("main", "while loop, dim=%d, brightness=%6.4lf, step=%6.4lf, max=%6.4lf", id(dim_direction_pv), brightness,id(step),id(light_pv_max_brightness));
+                        if (id(dim_direction_pv) == '1') {
+                           if ((id(step) + brightness) <= id(light_pv_max_brightness)) { 
+                              return(id(step));
+                           }
+                           else {
+                              auto call = id(light_buzzer).turn_on();
+                              call.set_effect("beeponce");
+                              call.perform();
+                              id(PV_loop_stop) = true;
+                              return(id(light_pv_max_brightness)- brightness);
+                           }
+                        }
+                        else if (id(dim_direction_pv) != '1') {
+                           if ((brightness - id(step)) >= id(light_pv_min_brightness)) { 
+                            return(-id(step));
+                           }
+                           else {
+                              auto call = id(light_buzzer).turn_on();
+                              call.set_effect("beeponce");
+                              call.perform();
+                              id(PV_loop_stop) = true;                          
+                             return(id(light_pv_min_brightness)- brightness);
+                           }  
+                        }
+                        // the else is strictly speaking not needed as the loop should break before this condition is true but if for whatever reason that would not happen at least we are returning something
+                        else {
+                          return(0);
+                        }
+                  transition_length: 0.1s
+            - delay: 0.1s
+      # now toggle the dim up/down direction so next time we do the opposite action
+      - globals.set:
+          id: dim_direction_pv
+          value: !lambda |-
+            if (id(dim_direction_pv) == '1') {
+                return('0');
+            } else {
+              return('1');
+            }
+            
+    #on_release:
+    #  - logger.log: "on_release"
+
+  # Button 2: push button to control the light "KV" connected to GPIO 3 / pwm_w2
+  - platform: gpio
+    # GPIO3 is Rx pin (but is marked on H801 as Tx!)
+    pin:
+      number: GPIO3 
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "Button 2"
+    id: light_kv_button
+    # we  use multi_click to get both single and double click
+    # single click to turn on and off (toggle)
+    # double click to set either max or min brightness: if currently off then turn on with brightness=max. If currently on, then if currently brigthness equals max then set to min, else set to max
+    on_multi_click:
+    - timing:
+      - ON for at most 1s
+      - OFF for at most 1s
+      - ON for at most 1s
+      - OFF for at least 0.2s
+      then:
+        - logger.log: "on_multi_click: Double Clicked"
+        - if:
+           condition: 
+             light.is_off: light_KV
+           then:
+             - light.turn_on: 
+                id: light_KV
+                brightness: !lambda |-
+                  return id(light_kv_max_brightness);
+        - if:
+           condition: 
+             light.is_on: light_KV
+           then:
+             - light.turn_on: 
+                id: light_KV
+                # if currently off then turn on with brightness=max. If currently on, then if currently brigthness equals max then set to min, else set to max:
+                brightness: !lambda |-
+                  float brightness;
+                  id(light_KV).current_values_as_brightness(&brightness);
+                  if (brightness >= id(light_kv_max_brightness)) {
+                    return id(light_kv_min_brightness);
+                  }
+                  else {
+                    return id(light_kv_max_brightness);
+                  }           
+    # single click to turn on and off (toggle):
+    - timing:
+       - ON for at most 350ms
+       - OFF for at least 350ms
+      then:
+        - logger.log: "on_multi_click: single click"
+        - light.toggle: light_KV
+    
+    # Long press to dim up and down:  
+    on_press:
+      then:
+      - logger.log: "on_press"
+      # we need this delay (and then to look for binary_sensor.is_on) to ensure it's not a multi-click
+      - delay: 0.75s
+      - if:
+          condition: 
+            and:
+               - light.is_off: light_KV
+               - binary_sensor.is_on: light_kv_button
+          then:
+             # if the light was off we also want the long press to turn it on and then start dimming
+             - light.toggle: light_KV
+          #- delay: 0.75s
+      #
+      # this sets the globales variable that will stop the while loop from needlessly running if the buttons keeps being pressed but ar are already at max or min value
+      # it's also needed to ensure the buzzer only buzzes once and doesn't keep buzzing when the max/min is reached
+      - lambda: |-
+           id(KV_loop_stop) = false;
+      - while:
+          # keep on going as long as the button is pressed and when the max/min threshold is not exceeded yet (indicated by the global var of type bool)
+          condition:
+            and:
+               - binary_sensor.is_on: light_kv_button
+               - lambda: |-
+                   return(!id(KV_loop_stop));
+          then:
+            - light.dim_relative: 
+                  id: light_KV
+                  # This lambda will dim up or down depending on the dim direction
+                  # if dim = up, it will keep increasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until max_brightness would be exceeded
+                  # in that case it will set it to max brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
+                  # if dim = down, it will keep decreasing brightness with global var 'step' (so we can easily change this in a central place) as long as the button keeps being pressed until min_brightness would be exceeded
+                  # in that case it will set it to min brightness, beep the buzzer once (the buzzer is defined as a light with effect "beeponce") and then stop the loop - this both prevent further needless loops as well as ensures the buzzer only buzzes once
+                  relative_brightness: !lambda |-
+                        float brightness;
+                        id(light_KV).current_values_as_brightness(&brightness);
+                        //id(light_KV).dump_config();
+                        ESP_LOGD("main", "while loop, dim=%d, brightness=%6.4lf, step=%6.4lf, max=%6.4lf", id(dim_direction_kv), brightness,id(step),id(light_kv_max_brightness));
+                        if (id(dim_direction_kv) == '1') {
+                           if ((id(step) + brightness) <= id(light_kv_max_brightness)) { 
+                              return(id(step));
+                           }
+                           else {
+                              auto call = id(light_buzzer).turn_on();
+                              call.set_effect("beeponce");
+                              call.perform();
+                              id(KV_loop_stop) = true;
+                              return(id(light_kv_max_brightness)- brightness);
+                           }
+                        }
+                        else if (id(dim_direction_kv) != '1') {
+                           if ((brightness - id(step)) >= id(light_kv_min_brightness)) { 
+                            return(-id(step));
+                           }
+                           else {
+                              auto call = id(light_buzzer).turn_on();
+                              call.set_effect("beeponce");
+                              call.perform();
+                              id(KV_loop_stop) = true;                          
+                             return(id(light_kv_min_brightness)- brightness);
+                           }  
+                        }
+                        // the else is strictly speaking not needed as the loop should break before this condition is true but if for whatever reason that would not happen at least we are returning something
+                        else {
+                          return(0);
+                        }
+                  transition_length: 0.1s
+            - delay: 0.1s
+      # now toggle the dim up/down direction so next time we do the opposite action
+      - globals.set:
+          id: dim_direction_kv
+          value: !lambda |-
+            if (id(dim_direction_kv) == '1') {
+                return('0');
+            } else {
+              return('1');
+            }
+
+# button to control (toggle) the switch connected to GPIO2
+  - platform: gpio
+    pin:
+      number: GPIO2
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "Button 3"
+    id: Switch_1_button     
+    on_click:
+      then:
+        - switch.toggle: switch_1
+
+# 
+switch:
+  # - platform: gpio
+    pin: 12
+    name: "Switch 1"
+    id: "switch_1"
+
+    # this provides fr a possibility to rstart from the web console or Home automation should we ever need it
+  - platform: restart
+    name: "Restart"
+
+output:
+  - platform: esp8266_pwm
+    pin: 15
+    frequency: 1000 Hz
+    id: pwm_r
+  - platform: esp8266_pwm
+    pin: 14
+    frequency: 2000 Hz
+    id: pwm_w1
+    #min_power: 0.01
+    #max_power: 0.95
+  - platform: esp8266_pwm
+    pin: 4
+    frequency: 2000 Hz
+    id: pwm_w2
+    #min_power: 0.01
+    #max_power: 0.95
+  - platform: gpio
+    pin: 1
+    id: green_led
+    inverted: True
+  - platform: gpio
+    pin: 13
+    id: buzzer
+     
+light:
+  - platform: monochromatic
+    name: "Kitchen cabinets"
+    id: light_KV
+    output: pwm_w2
+    gamma_correct: 1.0
+  - platform: monochromatic
+    name: "Kitchen ceiling"
+    output: pwm_w1
+    gamma_correct: 1.0
+    id: light_PV
+  - platform: monochromatic
+    name: "pwm_r"
+    output: pwm_r
+    id: light_pwm_r
+  - platform: binary
+    name: "light_green_led"
+    output: green_led
+    id: light_green_led
+  - platform: binary
+    #name: "buzzer"
+    output: buzzer
+    id: light_buzzer
+    effects:
+      - automation:
+         name: beeponce
+         sequence:
+            - light.turn_on: light_buzzer
+            - delay: 0.1s
+            - light.turn_off: light_buzzer
+      - automation:
+         name: beeptwice
+         sequence:
+            - light.turn_on: light_buzzer
+            - delay: 0.1s
+            - light.turn_off: light_buzzer
+            - delay: 0.075s
+            - light.turn_on: light_buzzer
+            - delay: 0.1s
+            - light.turn_off: light_buzzer
+
