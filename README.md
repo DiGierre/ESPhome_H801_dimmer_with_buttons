@@ -23,9 +23,9 @@ More info on the H801 can be found on the [ESPhome](https://esphome.io/cookbook/
 In the YAML file you of course have to make the changes for SSID, passwords etc. and comment/uncomment what you do/don't need.
 
 <B>ToDo</B>:
+- Define light effects so you can e.g. blink the lights when the doorbell rings
+- Define more buzzer effects so you can e.g. easily use the buzzer also for alarming
 - Domoticz MQTT (potential candidate - I haven't made up my mind as I don't like how Domoticz deals with MQTT)
-- Define light effects so I can e.g. blink the lights when the doorbell rings
-- Define nmore buzzer effects so I can e.g. easily use the buzzer also for alarming
 - ~~Dimming currently only works well with GAMMA correction = 1.0 set for the light due to the way brightness is read in the lambda (i have to figure this out)~~ Done in v0.4
 - ~~In some use case the dimmer tries to dim up even when brightness = max, makes little sense so needs to be corrected~~ Done in v0.4
 
